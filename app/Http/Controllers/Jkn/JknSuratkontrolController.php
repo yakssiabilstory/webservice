@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Jkn;
 
+use App\Helpers\BPer;
 use App\Http\Controllers\Controller;
 use App\Models\BridgingSuratKontrolBpjs;
 use Illuminate\Http\Request;
@@ -16,7 +17,7 @@ class JknSuratkontrolController extends Controller
             return response()->json(['code' => 204, 'message' => 'Tanggal rencana kontrol harus diisi!'], 200);
         }
 
-        if (!validTanggal($tanggal)) {
+        if (!BPer::validTanggal($tanggal)) {
             return response()->json([
                 'status' => false,
                 'message' => 'Format tanggal harus Y-m-d'

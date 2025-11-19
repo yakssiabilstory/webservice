@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Registrasi;
 
+use App\Helpers\BPer;
 use App\Http\Controllers\Controller;
 use App\Models\Dokter;
 use App\Models\Pasien;
@@ -10,6 +11,8 @@ use App\Models\ReferensiMobilejknBpjs;
 use App\Models\RegPeriksaModel;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+
+use function Pest\Laravel\json;
 
 class RegistrasiController extends Controller
 {
@@ -20,7 +23,7 @@ class RegistrasiController extends Controller
         $normedis = $request->norkmmedis;
         $tglperiksa = $request->tglperiksa;
         $jamperiksa = $request->jamperiksa;
-        $hariperiksa = tebakHari($tglperiksa);
+        $hariperiksa = BPer::tebakHari($tglperiksa);
         $noref = $request->noreferensi;
         $jkunj = $request->jeniskunjungan;
         $cbayar = $request->carabayar;
@@ -39,7 +42,7 @@ class RegistrasiController extends Controller
 
         if (!$tglperiksa || $tglperiksa == '') {
             return response()->json(['code' => 204, 'message' => 'Tanggal periksa belum diisi!'], 200);
-        } elseif (!validTanggal($tglperiksa)) {
+        } elseif (!BPer::validTanggal($tglperiksa)) {
             return response()->json([
                 'code' => 201,
                 'message' => 'Format tanggal harus Y-m-d'
@@ -80,7 +83,7 @@ class RegistrasiController extends Controller
         try {
             $pasien = Pasien::find($normedis);
 
-            $cPasienUmur = hitungUmur($pasien->tgl_lahir);
+            $cPasienUmur = Bper::hitungUmur($pasien->tgl_lahir);
             $expCpasienumur = explode(' ', $cPasienUmur);
 
             $regPeriksa = new RegPeriksaModel();
@@ -165,10 +168,10 @@ class RegistrasiController extends Controller
                                                 ON j.kd_dokter = rp.kd_dokter
                                             AND j.hari_kerja = '" . $hariperiksa . "'
                                             WHERE
-                                            rp.no_rawat = '2025/12/15/000001'
+                                            rp.no_rawat = '" . $regPeriksa->no_rawat . "'
                                             ");
 
-            // rp.no_rawat = '" . $regPeriksa->no_rawat . "'
+            //rp.no_rawat = '2025/12/15/000001'
 
             $jammulai = strtotime($regPeriksa->tgl_registrasi . ' ' . $dData[0]->jammulai);
             $eslayan = (int)config('confsistem.estimasi_layan') * (int)$regPeriksa->no_reg;
@@ -200,6 +203,8 @@ class RegistrasiController extends Controller
             $regAntrol->statuskirim = "Belum";
             $regAntrol->save();
 
+            DB::commit();
+
             $jsonAntrol = [
                 "kodebooking" => $regAntrol->nobooking,
                 "jenispasien" => $regPeriksa->kd_pj == 'BPJ' ? 'JKN' : 'NON JKN',
@@ -207,16 +212,12 @@ class RegistrasiController extends Controller
                 "nik" => $regAntrol->nik,
                 "nohp" => $regAntrol->nohp,
                 "kodepoli" => $regAntrol->kodepoli,
-                "namapoli" => Poliklinik::join('maping_poli_bpjs', 'maping_poli_bpjs.kd_poli_rs', '=', 'poliklinik.kd_poli')
-                    ->where('maping_poli_bpjs.kd_poli_bpjs', $regAntrol->kodepoli)
-                    ->value('nm_poli'),
+                "namapoli" => Poliklinik::join('maping_poli_bpjs', 'maping_poli_bpjs.kd_poli_rs', '=', 'poliklinik.kd_poli')->where('maping_poli_bpjs.kd_poli_bpjs', $regAntrol->kodepoli)->value('nm_poli'),
                 "pasienbaru" => (int)$regAntrol->pasienbaru,
                 "norm" => $regAntrol->norm,
                 "tanggalperiksa" => $regAntrol->tanggalperiksa,
                 "kodedokter" => (int)$regAntrol->kodedokter,
-                "namadokter" => Dokter::join('maping_dokter_dpjpvclaim', 'maping_dokter_dpjpvclaim.kd_dokter', '=', 'dokter.kd_dokter')
-                    ->where('maping_dokter_dpjpvclaim.kd_dokter_bpjs', $regAntrol->kodedokter)
-                    ->value('nm_dokter'),
+                "namadokter" => Dokter::join('maping_dokter_dpjpvclaim', 'maping_dokter_dpjpvclaim.kd_dokter', '=', 'dokter.kd_dokter')->where('maping_dokter_dpjpvclaim.kd_dokter_bpjs', $regAntrol->kodedokter)->value('nm_dokter'),
                 "jampraktek" => $regAntrol->jampraktek,
                 "jeniskunjungan" => (int)$regAntrol->jeniskunjungan,
                 "nomorreferensi" => $regAntrol->nomorreferensi,
@@ -231,20 +232,48 @@ class RegistrasiController extends Controller
                 "keterangan" => "Peserta harap 30 menit lebih awal guna pencatatan administrasi."
             ];
 
-            return $jsonAntrol;
+            $curl = curl_init();
 
-            // kondisi gagal
-            // if ($a->id == null) {
-            // throw new \Exception("Insert A gagal");
-            // }
+            curl_setopt_array($curl, array(
+                CURLOPT_URL => config('confsistem.addapi_url') . '/antrol/tambah-antrian.php', // your preferred url/
+                CURLOPT_RETURNTRANSFER => true,
+                CURLOPT_ENCODING => "",
+                CURLOPT_MAXREDIRS => 10,
+                CURLOPT_TIMEOUT => 30000,
+                CURLOPT_HTTP_VERSION => CURL_HTTP_VERSION_1_1,
+                CURLOPT_CUSTOMREQUEST => "POST",
+                CURLOPT_POSTFIELDS => json_encode($jsonAntrol),
+                CURLOPT_HTTPHEADER => array(
+                    // Set here requred headers
+                    "accept: */*",
+                    "accept-language: en-US,en;q=0.8",
+                    "content-type: application/json",
+                ),
+            ));
 
-            DB::commit();
+            $response = curl_exec($curl);
+            $err = curl_error($curl);
 
-            return response()->json([
-                'code' => 200,
-                'message' => 'Data berhasil dibuat',
-                'data' => $jsonAntrol
-            ]);
+            return $response;
+
+            $dResponse = json_decode($response, true);
+
+            if ($dResponse['metadata']['code'] == 200) {
+                ReferensiMobilejknBpjs::where('nobooking', $regAntrol->nobooking)->update([
+                    'statuskirim' => 'Sudah'
+                ]);
+
+                return response()->json([
+                    'code' => 200,
+                    'message' => 'Data berhasil dibuat'
+                ]);
+            } else {
+                return response()->json([
+                    'code' => 200,
+                    'message' => 'Tersimpan, gagal kirim antrean ke BPJS No Rawat : ' . $regAntrol->no_rawat,
+                    'response' => $response
+                ]);
+            }
         } catch (\Throwable $e) {
             DB::rollBack();
 
